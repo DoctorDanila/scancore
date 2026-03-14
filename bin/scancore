@@ -1,6 +1,24 @@
 #!/usr/bin/env php
 <?php
-require __DIR__ . '/..'.'/autoload.php';
+$possiblePaths = [
+    __DIR__ . '/../../../vendor/autoload.php',   // для установки в vendor/doctordanila/scancore
+    __DIR__ . '/../vendor/autoload.php',         // если пакет сам по себе
+    getcwd() . '/vendor/autoload.php'            // автозагрузчик корня проекта
+];
+
+$autoloadLoaded = false;
+foreach ($possiblePaths as $path) {
+    if (file_exists($path)) {
+        require $path;
+        $autoloadLoaded = true;
+        break;
+    }
+}
+
+if (!$autoloadLoaded) {
+    fwrite(STDERR, "Error: Could not find autoload.php\n");
+    exit(1);
+}
 
 use Scancore\Console\Application;
 
