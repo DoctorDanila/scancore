@@ -1,0 +1,30 @@
+{
+  "name": "doctordanila/scancore",
+  "description": "Console tool to scan project structure and dump file contents, respecting .scancoreignore",
+  "type": "library",
+  "require": {
+    "php": ">=7.4"
+  },
+  "autoload": {
+    "psr-4": {
+      "Scancore\\": "src/"
+    }
+  },
+  "authors": [
+    {
+      "name": "Kuznetsov Danila",
+      "email": "KD89504730600@yandex.ru",
+      "homepage": "https://github.com/DoctorDanila",
+      "role": "Developer"
+    },
+    {
+      "name": "Script Agency",
+      "homepage": "https://github.com/Factum-studio",
+      "role": "Owner"
+    }
+  ],
+  "license": "MIT",
+  "bin": [
+    "bin/scancore"
+  ]
+}
