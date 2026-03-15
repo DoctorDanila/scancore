@@ -7,9 +7,10 @@ class Application
 
     public function __construct()
     {
-        $this->commands['tree'] = new TreeCommand();
-        $this->commands['dump'] = new DumpCommand();
-        $this->commands['stats'] = new StatsCommand();
+        $this->commands['tree']     = new TreeCommand();
+        $this->commands['dump']     = new DumpCommand();
+        $this->commands['stats']    = new StatsCommand();
+        $this->commands['init']     = new InitCommand();
     }
 
     public function run(): void
