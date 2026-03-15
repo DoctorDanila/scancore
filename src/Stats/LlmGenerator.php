@@ -18,6 +18,7 @@ class LlmGenerator
             'summary' => [
                 'total_files' => $this->stats['total_files'],
                 'total_lines_of_code' => $this->stats['total_lines'],
+                'average_lines_per_file' => $this->stats['average_lines'],
                 'files_by_type' => $this->stats['files_by_type'],
             ],
             'largest_files' => array_map(function($f) {
