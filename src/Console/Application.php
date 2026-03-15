@@ -9,6 +9,7 @@ class Application
     {
         $this->commands['tree'] = new TreeCommand();
         $this->commands['dump'] = new DumpCommand();
+        $this->commands['stats'] = new StatsCommand();
     }
 
     public function run(): void
