@@ -1,1 +1,4 @@
 .idea
+.scancoreignore
+scancore_output.txt
+vendor/
