@@ -13,6 +13,10 @@ class Scanner
     public function __construct(string $rootDir)
     {
         $this->rootDir  = rtrim($rootDir, '/') . '/';
+
+        $initializer = new IgnoreInitializer();
+        $initializer->ensure($this->rootDir, false, true);
+
         $this->ignore   = new IgnoreRules($this->rootDir);
     }
 
