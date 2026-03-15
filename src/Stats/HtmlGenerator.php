@@ -16,6 +16,7 @@ class HtmlGenerator
     {
         $totalFiles = $this->stats['total_files'];
         $totalLines = $this->stats['total_lines'];
+        $averageLines = $this->stats['average_lines'];
         $filesByType = $this->stats['files_by_type'];
         $largestFiles = $this->stats['largest_files'];
         $activity = $this->stats['activity_by_day'];
@@ -122,6 +123,7 @@ class HtmlGenerator
     <h1>Статистика проекта</h1>
     <p>Всего файлов: <strong>{$totalFiles}</strong></p>
     <p>Всего строк кода (приблизительно, без комментариев и пустых строк): <strong>{$totalLines}</strong></p>
+    <p>Среднее количество строк на файл: <strong>{$averageLines}</strong></p>
 
     <h2>Распределение по типам файлов</h2>
     <table>
