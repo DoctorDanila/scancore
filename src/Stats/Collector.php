@@ -17,6 +17,7 @@ class Collector
         $stats = [
             'total_files' => 0,
             'total_lines' => 0,
+            'average_lines' => 0,
             'files_by_type' => [],
             'largest_files' => [],
             'activity_by_day' => [],
@@ -53,6 +54,10 @@ class Collector
             ];
 
             $largest[] = ['path' => $relativePath, 'size' => $size, 'lines' => $lines];
+        }
+
+        if ($stats['total_files'] > 0) {
+            $stats['average_lines'] = round($stats['total_lines'] / $stats['total_files']);
         }
 
         usort($largest, fn($a, $b) => $b['size'] <=> $a['size']);
