@@ -10,14 +10,21 @@ class Scanner
     private string $rootDir;
     private IgnoreRules $ignore;
 
-    public function __construct(string $rootDir)
+    /**
+     * @param string $rootDir Корневая директория проекта.
+     * @param array $additionalPatterns Временные паттерны для игнорирования (из командной строки).
+     */
+    public function __construct(string $rootDir, array $additionalPatterns = [])
     {
-        $this->rootDir  = rtrim($rootDir, '/') . '/';
+        $this->rootDir = rtrim($rootDir, '/') . '/';
 
         $initializer = new IgnoreInitializer();
         $initializer->ensure($this->rootDir, false, true);
 
-        $this->ignore   = new IgnoreRules($this->rootDir);
+        $this->ignore = new IgnoreRules($this->rootDir);
+        if (!empty($additionalPatterns)) {
+            $this->ignore->addPatterns($additionalPatterns);
+        }
     }
 
     /**

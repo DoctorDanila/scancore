@@ -6,11 +6,13 @@ use Scancore\Stats\Collector;
 use Scancore\Stats\DependencyAnalyzer;
 use Scancore\Stats\HtmlGenerator;
 use Scancore\Stats\LlmGenerator;
+use Scancore\IgnoreOptionHandler;
 
 class StatsCommand implements ICommand
 {
-    public function execute(array $args): void
+    public function execute(Input $input): void
     {
+        $args = $input->getArguments();
         $baseName = $args[0] ?? 'stats';
         if ($baseName === '.') {
             $baseName = 'stats';
@@ -21,7 +23,10 @@ class StatsCommand implements ICommand
 
         $root = getcwd();
 
-        $scanner = new Scanner($root);
+        $ignoreHandler = new IgnoreOptionHandler($input, 'stats', $root);
+        $additionalPatterns = $ignoreHandler->getPatterns();
+
+        $scanner = new Scanner($root, $additionalPatterns);
         $paths = $scanner->scan();
 
         if ($filterPath !== '') {

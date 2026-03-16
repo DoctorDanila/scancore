@@ -2,11 +2,13 @@
 namespace Scancore\Console;
 
 use Scancore\Scanner;
+use Scancore\IgnoreOptionHandler;
 
 class DumpCommand implements ICommand
 {
-    public function execute(array $args): void
+    public function execute(Input $input): void
     {
+        $args = $input->getArguments();
         $outputFile = $args[0] ?? 'scancore_output.txt';
         if ($outputFile === '.') {
             $outputFile = 'scancore_output.txt';
@@ -14,7 +16,10 @@ class DumpCommand implements ICommand
         $filterPath = isset($args[1]) ? trim(str_replace('\\', '/', $args[1]), '/') : '';
         $root = getcwd();
 
-        $scanner = new Scanner($root);
+        $ignoreHandler = new IgnoreOptionHandler($input, 'dump', $root);
+        $additionalPatterns = $ignoreHandler->getPatterns();
+
+        $scanner = new Scanner($root, $additionalPatterns);
         $paths = $scanner->scan();
 
         if ($filterPath !== '') {

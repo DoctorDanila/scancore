@@ -3,5 +3,5 @@ namespace Scancore\Console;
 
 interface ICommand
 {
-    public function execute(array $args): void;
+    public function execute(Input $input): void;
 }
