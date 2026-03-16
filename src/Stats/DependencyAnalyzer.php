@@ -13,7 +13,7 @@ if (!defined('T_NAME_RELATIVE')) {
 
 class DependencyAnalyzer
 {
-    private const DEBUG = true;
+    private const DEBUG = false;
     private string $root;
     private array $paths;
     private array $classMap = [];
