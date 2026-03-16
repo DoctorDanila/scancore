@@ -27,7 +27,7 @@ class StatsCommand implements ICommand
         $additionalPatterns = $ignoreHandler->getPatterns();
 
         $scanner = new Scanner($root, $additionalPatterns);
-        $paths = $scanner->scan();
+        $paths = $scanner->scan(); // все пути (файлы и папки)
 
         if ($filterPath !== '') {
             $paths = array_filter($paths, function ($p) use ($filterPath) {
@@ -43,8 +43,8 @@ class StatsCommand implements ICommand
         $dependencyAnalyzer = new DependencyAnalyzer($root, $paths);
         $dependencies = $dependencyAnalyzer->analyze();
 
-        // Генерация HTML-отчёта
-        $htmlGenerator = new HtmlGenerator($stats, $dependencies);
+        // Генерация HTML-отчёта (передаём все пути для дерева)
+        $htmlGenerator = new HtmlGenerator($stats, $dependencies, $paths);
         $html = $htmlGenerator->generate();
         file_put_contents($root . '/' . $baseName . '.html', $html);
 
