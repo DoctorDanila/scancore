@@ -47,6 +47,7 @@
         .footer { margin-top: 40px; text-align: center; color: #666; font-size: 0.9em; }
         .footer a { color: #333; text-decoration: none; }
         .footer a:hover { text-decoration: underline; }
+        label { user-select: none; }
     </style>
 </head>
 <body>

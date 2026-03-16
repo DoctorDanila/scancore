@@ -224,22 +224,45 @@ class DependencyAnalyzer
                         $type = 'include';
                         $i++;
                         $this->skipWhitespace($tokens, $i);
-                        $argToken = $tokens[$i] ?? null;
-                        if (is_array($argToken) && $argToken[0] === T_CONSTANT_ENCAPSED_STRING) {
-                            $includePath = trim($argToken[1], '\'"');
-                            $this->debugLog("Found include token in $relativeFile: $includePath");
+
+                        // Собираем всё выражение до точки с запятой, учитывая вложенные скобки
+                        $expr = '';
+                        $depth = 0;
+                        while (isset($tokens[$i]) && !(is_string($tokens[$i]) && $tokens[$i] === ';' && $depth === 0)) {
+                            if (is_array($tokens[$i])) {
+                                $tokenValue = $tokens[$i][1];
+                            } else {
+                                $tokenValue = $tokens[$i];
+                                if ($tokenValue === '(') $depth++;
+                                if ($tokenValue === ')') $depth--;
+                            }
+                            $expr .= $tokenValue;
+                            $i++;
+                        }
+                        // Пропускаем точку с запятой
+                        if (isset($tokens[$i]) && is_string($tokens[$i]) && $tokens[$i] === ';') {
+                            $i++;
+                        }
+
+                        // Пытаемся вычислить путь
+                        $includePath = $this->evaluateIncludePath($expr, $relativeFile);
+                        if ($includePath) {
+                            $this->debugLog("Evaluated include path: $includePath from expr: $expr");
                             $resolvedFile = $this->resolveIncludePath($includePath, $relativeFile);
                             if ($resolvedFile) {
                                 $deps[] = ['file' => $resolvedFile, 'type' => $type];
                                 $this->debugLog("  Resolved to: $resolvedFile");
                             } else {
-                                $this->debugLog("  Could not resolve");
+                                $this->debugLog("  Could not resolve evaluated path: $includePath");
                             }
+                        } else {
+                            $this->debugLog("Could not evaluate include expression: $expr");
                         }
-                        break;
+
+                        // Завершаем обработку этого case, пропуская стандартный инкремент $i в конце цикла
+                        continue 2;
 
                     case T_NEW:
-                    case T_DOUBLE_COLON:
                     case T_INSTANCEOF:
                     case T_CATCH:
                         $type = 'usage';
@@ -255,6 +278,10 @@ class DependencyAnalyzer
                                 $this->debugLog("Dependency in $relativeFile: $type $className could not be resolved (full class: $fullClass)");
                             }
                         }
+                        break;
+
+                    case T_DOUBLE_COLON:
+                        $this->handleDoubleColon($tokens, $i, $namespace, $uses, $relativeFile, $deps);
                         break;
                 }
             }
@@ -278,6 +305,102 @@ class DependencyAnalyzer
             $unique[$key] = $dep;
         }
         return array_values($unique);
+    }
+
+    /**
+     * Обрабатывает оператор T_DOUBLE_COLON (::) для определения класса слева.
+     *
+     * @param array  $tokens       Массив токенов
+     * @param int    $i            Текущая позиция (указывает на T_DOUBLE_COLON)
+     * @param string $namespace    Текущее пространство имён
+     * @param array  $uses         Импорты (use)
+     * @param string $relativeFile Текущий файл
+     * @param array  $deps         Ссылка на массив зависимостей
+     */
+    private function handleDoubleColon(array $tokens, int &$i, string $namespace, array $uses, string $relativeFile, array &$deps): void
+    {
+        // 1. Определяем левую часть (класс)
+        $leftIdx = $i - 1;
+        // Пропускаем пробелы и комментарии слева
+        while ($leftIdx >= 0 && isset($tokens[$leftIdx]) && is_array($tokens[$leftIdx]) && in_array($tokens[$leftIdx][0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
+            $leftIdx--;
+        }
+
+        $leftToken = $leftIdx >= 0 ? $tokens[$leftIdx] : null;
+        $isClassToken = $leftToken && is_array($leftToken) && in_array($leftToken[0], [T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NAME_RELATIVE]);
+
+        // 2. Пропускаем сам оператор ::
+        $i++;
+        $this->skipWhitespace($tokens, $i);
+
+        // 3. Читаем имя после :: (метод или свойство) - продвигаем указатель, но само имя не сохраняем
+        $rightPart = $this->readClassName($tokens, $i); // функция продвигает $i до конца имени
+
+        if ($isClassToken) {
+            $className = $leftToken[1];
+            // Разрешаем класс
+            $fullClass = $this->resolveClassName($className, $namespace, $uses);
+            if (isset($this->classMap[$fullClass])) {
+                $deps[] = ['file' => $this->classMap[$fullClass], 'type' => 'usage'];
+                $this->debugLog("Static call in $relativeFile: $className resolved to {$this->classMap[$fullClass]}");
+            } else {
+                $this->debugLog("Static call in $relativeFile: $className could not be resolved (full class: $fullClass)");
+            }
+        } else {
+            // Это может быть self::, parent::, static:: или $obj:: — пропускаем
+            $this->debugLog("Static call with non-class left side in $relativeFile, skipping");
+        }
+    }
+
+    /**
+     * Пытается вычислить путь для include из собранного выражения.
+     *
+     * @param string $expr         Выражение, как оно выглядит в коде (например, "__DIR__ . '/file.php'").
+     * @param string $relativeFile Относительный путь файла, из которого вызывается include (не используется здесь, но может пригодиться).
+     * @return string|null Вычисленный путь (относительный) или null, если не удалось.
+     */
+    private function evaluateIncludePath(string $expr, string $relativeFile): ?string
+    {
+        $expr = trim($expr);
+        if ($expr === '') {
+            return null;
+        }
+
+        // 1. Простая строка в кавычках
+        if (preg_match('/^([\'"])(.*?)\1$/', $expr, $matches)) {
+            return $matches[2];
+        }
+
+        // 2. Конструкция __DIR__ . 'путь'
+        if (strpos($expr, '__DIR__') === 0) {
+            $rest = substr($expr, strlen('__DIR__'));
+            $rest = trim($rest);
+            // Ожидаем конкатенацию через точку
+            if (strpos($rest, '.') === 0) {
+                $rest = substr($rest, 1);
+                $rest = trim($rest);
+                if (preg_match('/^([\'"])(.*?)\1$/', $rest, $matches)) {
+                    $relativePath = $matches[2];
+                    // Нормализуем слеши (заменяем обратные на прямые)
+                    $relativePath = str_replace('\\', '/', $relativePath);
+                    // Убираем возможный ведущий слеш для единообразия (resolveIncludePath добавит свой разделитель)
+                    return ltrim($relativePath, '/');
+                }
+            }
+            // Если после __DIR__ ничего нет, возвращаем пустую строку (текущая директория)
+            if ($rest === '') {
+                return '';
+            }
+            return null;
+        }
+
+        // 3. Возможно, просто строка с кавычками, содержащая пробелы (например, "path/file.php")
+        $stripped = trim($expr, '\'"');
+        if ($stripped !== $expr) {
+            return str_replace('\\', '/', $stripped);
+        }
+
+        return null;
     }
 
     private function skipWhitespace(array $tokens, int &$i): void
