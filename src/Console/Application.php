@@ -25,8 +25,10 @@ class Application
             return;
         }
 
+        $input = new Input($args);
+
         try {
-            $this->commands[$commandName]->execute($args);
+            $this->commands[$commandName]->execute($input);
         } catch (\Exception $e) {
             $this->error($e->getMessage());
         }
