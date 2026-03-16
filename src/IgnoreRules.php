@@ -12,6 +12,22 @@ class IgnoreRules
         $this->load();
     }
 
+    /**
+     * Добавляет временные паттерны к существующим правилам.
+     *
+     * @param array $patterns Список строк-паттернов (как в .scancoreignore)
+     */
+    public function addPatterns(array $patterns): void
+    {
+        foreach ($patterns as $pattern) {
+            $pattern = trim($pattern);
+            if ($pattern === '' || $pattern[0] === '#') {
+                continue;
+            }
+            $this->patterns[] = $this->parsePattern($pattern);
+        }
+    }
+
     private function load(): void
     {
         $file = $this->basePath . '.scancoreignore';
@@ -30,18 +46,18 @@ class IgnoreRules
         }
     }
 
-    private function parsePattern(string $pattern): array
+    protected function parsePattern(string $pattern): array
     {
         $rootOnly = false;
         $dirOnly = false;
 
-        // Шаблон, начинающийся с / — применяется только в корне
+        // Шаблон, начинающийся с / - применяется только в корне
         if (strpos($pattern, '/') === 0) {
             $rootOnly = true;
             $pattern = substr($pattern, 1);
         }
 
-        // Шаблон, заканчивающийся на / — применяется только к директориям
+        // Шаблон, заканчивающийся на / - применяется только к директориям
         if (substr($pattern, -1) === '/') {
             $dirOnly = true;
             $pattern = substr($pattern, 0, -1);
@@ -60,31 +76,27 @@ class IgnoreRules
 
     private function patternToRegex(string $pattern, bool $rootOnly): string
     {
-        // Экранируем специальные символы регулярных выражений
         $regex = preg_quote($pattern, '#');
-
-        // Замена ** на .*? (любая последовательность, включая слеши)
+        // Замена ** на .*?
         $regex = str_replace('\\*\\*', '.*?', $regex);
-
-        // Замена * на [^/]* (любая последовательность, кроме слеша)
+        // Замена * на [^/]*
         $regex = str_replace('\\*', '[^/]*', $regex);
-
-        // Замена ? на [^/] (один любой символ, кроме слеша)
+        // Замена ? на [^/]
         $regex = str_replace('\\?', '[^/]', $regex);
 
-        // Если шаблон не корневой и не содержит слешей, добавляем **/ в начало,
-        // чтобы он соответствовал любому уровню вложенности (например, .idea везде)
         if (!$rootOnly && strpos($pattern, '/') === false) {
-            $regex = '(.*?/)?' . $regex;
+            // Паттерн без слешей должен соответствовать любому пути, где он является целым компонентом
+            $regex = '(^|/)' . $regex . '$';
+        } else {
+            $regex = '^' . $regex . '$';
         }
-
-        return '#^' . $regex . '$#';
+        return '#' . $regex . '#';
     }
 
     public function isIgnored(string $relativePath, bool $isDir): bool
     {
         foreach ($this->patterns as $p) {
-            // Если правило только для директорий, а текущий элемент — файл, пропускаем
+            // Если правило только для директорий, а текущий элемент - файл, пропускаем
             if ($p['dirOnly'] && !$isDir) {
                 continue;
             }
