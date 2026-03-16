@@ -1,15 +1,20 @@
 <?php
 namespace Scancore\Stats;
 
+use Scancore\TreeBuilder;
+use Scancore\TreeRenderer;
+
 class HtmlGenerator
 {
     private array $stats;
     private array $dependencies;
+    private array $allPaths;
 
-    public function __construct(array $stats, array $dependencies)
+    public function __construct(array $stats, array $dependencies, array $allPaths)
     {
         $this->stats = $stats;
         $this->dependencies = $dependencies;
+        $this->allPaths = $allPaths;
     }
 
     public function generate(): string
@@ -21,7 +26,10 @@ class HtmlGenerator
         $largestFiles = $this->stats['largest_files'];
         $activity = $this->stats['activity_by_day'];
 
-        // Формируем таблицу активности по дням
+        // Дерево проекта
+        $treeHtml = $this->renderTree();
+
+        // Таблица активности по дням
         $activityRows = '';
         foreach ($activity as $date => $count) {
             $activityRows .= "<tr><td>{$date}</td><td>{$count}</td></tr>";
@@ -33,22 +41,22 @@ class HtmlGenerator
             $largestRows .= "<tr><td>{$f['path']}</td><td>{$f['size']} B</td><td>{$f['lines']}</td></tr>";
         }
 
-        // Топ файлов, от которых больше всего зависят другие
+        // Топ файлов, от которых чаще всего зависят другие (все типы)
         $mostDependedRows = '';
         $i = 0;
         foreach ($this->dependencies['dependencies'] ?? [] as $file => $dependents) {
-            if ($i++ >= 20) break; // покажем топ-20
+            if ($i++ >= 20) break;
             $count = count($dependents);
             $mostDependedRows .= "<tr><td>{$file}</td><td>{$count}</td></tr>";
         }
 
-        // Топ файлов, которые сами больше всего зависят от других
-        $mostDependingRows = '';
+        // Топ файлов, которые сами больше всего зависят от других (все типы)
         $dependingCounts = [];
-        foreach ($this->dependencies['dependents'] ?? [] as $file => $dependsOn) {
-            $dependingCounts[$file] = count($dependsOn);
+        foreach ($this->dependencies['dependents'] ?? [] as $file => $depList) {
+            $dependingCounts[$file] = count($depList);
         }
         arsort($dependingCounts);
+        $mostDependingRows = '';
         $i = 0;
         foreach ($dependingCounts as $file => $count) {
             if ($i++ >= 20) break;
@@ -61,149 +69,157 @@ class HtmlGenerator
             $typesRows .= "<tr><td>{$ext}</td><td>{$count}</td></tr>";
         }
 
-        // Подготовка данных для графа зависимостей
-        $nodes = [];
-        $edges = [];
-        $nodeIds = [];
-        $nextId = 1;
+        // ---- Блок зависимостей по импортам (use) ----
+        $importsFrom = [];
+        $importsTo = [];
 
-        // Собираем все уникальные файлы, участвующие в зависимостях
-        $allFiles = array_unique(array_merge(
-            array_keys($this->dependencies['dependents'] ?? []),
-            array_keys($this->dependencies['dependencies'] ?? [])
-        ));
-
-        foreach ($allFiles as $file) {
-            $nodeIds[$file] = $nextId++;
-            $nodes[] = [
-                'id' => $nodeIds[$file],
-                'label' => basename($file),
-                'title' => $file, // полный путь во всплывающей подсказке
-                'shape' => 'box',
-            ];
+        foreach ($this->dependencies['dependents'] ?? [] as $from => $depList) {
+            foreach ($depList as $dep) {
+                if ($dep['type'] === 'import') {
+                    $to = $dep['file'];
+                    $importsFrom[$from][] = $to;
+                    $importsTo[$to][] = $from;
+                }
+            }
         }
 
-        // Создаём рёбра: если файл A зависит от B, то ребро A -> B
-        foreach ($this->dependencies['dependents'] ?? [] as $from => $toList) {
-            if (!isset($nodeIds[$from])) continue;
-            foreach ($toList as $to) {
-                if (!isset($nodeIds[$to])) continue;
+        uasort($importsFrom, fn($a, $b) => count($b) <=> count($a));
+        uasort($importsTo, fn($a, $b) => count($b) <=> count($a));
+
+        $importsFromRows = '';
+        $i = 0;
+        foreach ($importsFrom as $file => $list) {
+            if ($i++ >= 20) break;
+            $importsFromRows .= "<tr><td>{$file}</td><td>" . count($list) . "</td></tr>";
+        }
+
+        $importsToRows = '';
+        $i = 0;
+        foreach ($importsTo as $file => $list) {
+            if ($i++ >= 20) break;
+            $importsToRows .= "<tr><td>{$file}</td><td>" . count($list) . "</td></tr>";
+        }
+
+        // Построение данных для Cytoscape
+        $graphAllData = $this->buildGraphData($this->dependencies['dependents'] ?? []);
+        $graphImportData = $this->buildGraphData($this->filterDepsByType($this->dependencies['dependents'] ?? [], 'import'));
+
+        // Подключаем шаблон
+        ob_start();
+        include __DIR__ . '/../../resources/views/stats.php';
+        return ob_get_clean();
+    }
+
+    private function renderTree(): string
+    {
+        $builder = new TreeBuilder();
+        $tree = $builder->buildTree($this->allPaths);
+        $renderer = new TreeRenderer();
+        return $renderer->render($tree);
+    }
+
+    /**
+     * Строит данные для графа Cytoscape с учётом иерархии директорий.
+     * Возвращает массив с ключами 'nodes' и 'edges'.
+     */
+    private function buildGraphData(array $dependents): array
+    {
+        $nodes = [];
+        $edges = [];
+
+        // Собираем все файлы, участвующие в зависимостях
+        $allFiles = array_keys($dependents);
+        foreach ($dependents as $from => $toList) {
+            foreach ($toList as $dep) {
+                $allFiles[] = $dep['file'];
+            }
+        }
+        $allFiles = array_unique($allFiles);
+
+        // Собираем все директории, встречающиеся в путях
+        $dirs = [];
+        foreach ($allFiles as $file) {
+            $dir = dirname($file);
+            while ($dir !== '.' && $dir !== '/') {
+                $dirs[] = $dir;
+                $dir = dirname($dir);
+            }
+        }
+        $dirs = array_unique($dirs);
+
+        // Создаём узлы для директорий
+        $dirNodes = [];
+        foreach ($dirs as $dir) {
+            $id = 'dir:' . $dir;
+            $label = basename($dir) ?: '/';
+            $nodes[$id] = [
+                'data' => [
+                    'id' => $id,
+                    'label' => $label,
+                    'type' => 'dir',
+                    'path' => $dir,
+                ]
+            ];
+            $dirNodes[$dir] = $id;
+        }
+
+        // Создаём узлы для файлов и устанавливаем родительскую директорию
+        $fileNodes = [];
+        foreach ($allFiles as $file) {
+            $id = 'file:' . $file;
+            $parentDir = dirname($file);
+            $parentId = $dirNodes[$parentDir] ?? null;
+
+            $node = [
+                'data' => [
+                    'id' => $id,
+                    'label' => basename($file),
+                    'type' => 'file',
+                    'path' => $file,
+                ]
+            ];
+            if ($parentId) {
+                $node['data']['parent'] = $parentId;
+            }
+            $nodes[$id] = $node;
+            $fileNodes[$file] = $id;
+        }
+
+        // Создаём рёбра
+        foreach ($dependents as $from => $toList) {
+            if (!isset($fileNodes[$from])) continue;
+            $fromId = $fileNodes[$from];
+            foreach ($toList as $dep) {
+                $to = $dep['file'];
+                $type = $dep['type'];
+                if (!isset($fileNodes[$to])) continue;
+                $toId = $fileNodes[$to];
                 $edges[] = [
-                    'from' => $nodeIds[$from],
-                    'to' => $nodeIds[$to],
-                    'arrows' => 'to',
+                    'data' => [
+                        'id' => uniqid('edge_'),
+                        'source' => $fromId,
+                        'target' => $toId,
+                        'type' => $type,
+                    ]
                 ];
             }
         }
 
-        $nodesJson = json_encode($nodes, JSON_UNESCAPED_SLASHES);
-        $edgesJson = json_encode($edges, JSON_UNESCAPED_SLASHES);
+        return [
+            'nodes' => array_values($nodes),
+            'edges' => $edges,
+        ];
+    }
 
-        return <<<HTML
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Scancore — статистика проекта</title>
-    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-    <style>
-        body { font-family: sans-serif; margin: 2em; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: auto; background: white; padding: 2em; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1, h2, h3 { color: #333; }
-        table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9em; }
-        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
-        th { background-color: #f2f2f2; }
-        #graph { width: 100%; height: 600px; border: 1px solid #ddd; margin: 20px 0; }
-        .two-columns { display: flex; gap: 20px; }
-        .two-columns > div { flex: 1; }
-    </style>
-</head>
-<body>
-<div class="container">
-    <h1>Статистика проекта</h1>
-    <p>Всего файлов: <strong>{$totalFiles}</strong></p>
-    <p>Всего строк кода (приблизительно, без комментариев и пустых строк): <strong>{$totalLines}</strong></p>
-    <p>Среднее количество строк на файл: <strong>{$averageLines}</strong></p>
-
-    <h2>Распределение по типам файлов</h2>
-    <table>
-        <tr><th>Расширение</th><th>Количество</th></tr>
-        {$typesRows}
-    </table>
-
-    <div class="two-columns">
-        <div>
-            <h2>Самые большие файлы (топ-10)</h2>
-            <table>
-                <tr><th>Файл</th><th>Размер</th><th>Строк</th></tr>
-                {$largestRows}
-            </table>
-        </div>
-        <div>
-            <h2>Активность по дням (последние изменения)</h2>
-            <table>
-                <tr><th>Дата</th><th>Файлов изменено</th></tr>
-                {$activityRows}
-            </table>
-        </div>
-    </div>
-
-    <div class="two-columns">
-        <div>
-            <h2>Файлы, от которых чаще всего зависят другие</h2>
-            <table>
-                <tr><th>Файл</th><th>Количество зависимых</th></tr>
-                {$mostDependedRows}
-            </table>
-        </div>
-        <div>
-            <h2>Файлы с наибольшим числом зависимостей</h2>
-            <table>
-                <tr><th>Файл</th><th>Сколько зависит от других</th></tr>
-                {$mostDependingRows}
-            </table>
-        </div>
-    </div>
-
-    <h2>Граф зависимостей (PHP)</h2>
-    <p>Направление стрелки: от файла к тому, от которого он зависит.</p>
-    <div id="graph"></div>
-</div>
-
-<script>
-    (function() {
-        const nodes = new vis.DataSet({$nodesJson});
-        const edges = new vis.DataSet({$edgesJson});
-
-        const container = document.getElementById('graph');
-        const data = { nodes, edges };
-        const options = {
-            layout: {
-                hierarchical: false,
-                improvedLayout: true,
-            },
-            edges: {
-                smooth: { type: 'cubicBezier' },
-                arrows: { to: { enabled: true, scaleFactor: 0.5 } },
-            },
-            physics: {
-                enabled: true,
-                solver: 'forceAtlas2Based',
-                stabilization: { iterations: 100 },
-            },
-            interaction: {
-                hover: true,
-                tooltipDelay: 200,
-                navigationButtons: true,
-            },
-            manipulation: false,
-        };
-
-        new vis.Network(container, data, options);
-    })();
-</script>
-</body>
-</html>
-HTML;
+    private function filterDepsByType(array $dependents, string $type): array
+    {
+        $result = [];
+        foreach ($dependents as $from => $list) {
+            $filtered = array_filter($list, fn($dep) => $dep['type'] === $type);
+            if (!empty($filtered)) {
+                $result[$from] = array_values($filtered);
+            }
+        }
+        return $result;
     }
 }
