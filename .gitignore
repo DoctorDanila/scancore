@@ -1,4 +1,7 @@
 .idea
 .scancoreignore
 scancore_output.txt
+stats.html
+stats_llm.txt
+.env
 vendor/
