@@ -13,6 +13,8 @@
  * @var string $importsToRows
  * @var array  $graphAllData   ['nodes' => array, 'edges' => array]
  * @var array  $graphImportData ['nodes' => array, 'edges' => array]
+ * @var int    $totalNodes     Количество узлов в полном графе
+ * @var bool   $isLargeGraph   Флаг большого графа (>100 узлов)
  */
 ?><!DOCTYPE html>
 <html lang="ru">
@@ -42,12 +44,12 @@
         .tab button:hover { background-color: #ddd; }
         .tab button.active { background-color: #ccc; }
         .tabcontent { display: none; padding: 20px; border: 1px solid #ccc; border-top: none; }
-        .filters { display: flex; gap: 20px; flex-wrap: wrap; margin: 10px 0; }
-        .filter-group { display: flex; align-items: center; gap: 10px; }
+        .filters { display: flex; gap: 20px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
+        .filter-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .graph-info { margin: 10px 0; padding: 10px; background: #e7f3ff; border-radius: 4px; }
         .footer { margin-top: 40px; text-align: center; color: #666; font-size: 0.9em; }
         .footer a { color: #333; text-decoration: none; }
         .footer a:hover { text-decoration: underline; }
-        label { user-select: none; }
     </style>
 </head>
 <body>
@@ -114,6 +116,18 @@
             <div class="legend-item"><span class="legend-color" style="background:#FF9900;"></span> include/require</div>
             <div class="legend-item"><span class="legend-color" style="background:#AA66CC;"></span> usage (new, ::, instanceof, catch)</div>
         </div>
+
+        <!-- Информация о размере графа и рекомендации -->
+        <div class="graph-info">
+            <strong>Граф зависимостей содержит <?= $totalNodes ?> узлов.</strong>
+            <?php if ($isLargeGraph): ?>
+                Для улучшения производительности используется layout <strong>cose</strong> (быстрый, но менее точный).
+                                                                                           Вы можете переключиться на точный layout <strong>cose-bilkent</strong> кнопкой ниже (может замедлить работу).
+            <?php else: ?>
+                Используется точный layout <strong>cose-bilkent</strong>.
+            <?php endif; ?>
+        </div>
+
         <div class="filters">
             <div class="filter-group">
                 <label><input type="checkbox" class="edge-filter" data-type="extends" checked> extends</label>
@@ -123,8 +137,12 @@
                 <label><input type="checkbox" class="edge-filter" data-type="usage" checked> usage</label>
             </div>
             <div>
-<!--                <button id="collapseAll">Свернуть все</button>-->
-<!--                <button id="expandAll">Развернуть все</button>-->
+                <button id="switchLayoutBtn" onclick="switchLayoutAll()">
+                    Переключить на <?= $isLargeGraph ? 'cose-bilkent' : 'cose' ?>
+                </button>
+                <span id="layoutInfo" style="margin-left: 10px; font-size: 0.9em; color: #666;">
+                    (текущий: <?= $isLargeGraph ? 'cose (быстрый)' : 'cose-bilkent (точный)' ?>)
+                </span>
             </div>
         </div>
         <div id="graphAllContainer" class="graph-container"></div>
@@ -162,13 +180,21 @@
     var cyImport = null;
     var collapseApi = null;
 
+    // Данные из PHP
+    var graphAllData = <?= json_encode($graphAllData, JSON_UNESCAPED_SLASHES) ?>;
+    var graphImportData = <?= json_encode($graphImportData, JSON_UNESCAPED_SLASHES) ?>;
+    var isLargeGraph = <?= json_encode($isLargeGraph) ?>;
+    var totalNodes = <?= json_encode($totalNodes) ?>;
+
+    // Текущий layout для графа всех зависимостей
+    var currentLayoutAll = isLargeGraph ? 'cose' : 'cose-bilkent';
+
     // Регистрация расширений Cytoscape (выполняется один раз)
     (function registerExtensions() {
         if (typeof cytoscape === 'undefined') {
             console.error('Cytoscape не загружен');
             return;
         }
-        // Регистрируем cose-bilkent, если ещё не зарегистрирован
         if (typeof cytoscapeCoseBilkent === 'function') {
             cytoscapeCoseBilkent(cytoscape);
             console.log('cytoscape-cose-bilkent зарегистрирован');
@@ -176,7 +202,6 @@
             console.warn('cytoscapeCoseBilkent не найден');
         }
 
-        // Регистрируем expand-collapse, если ещё не зарегистрирован
         if (typeof cytoscapeExpandCollapse === 'function' && !cytoscape.prototype.expandCollapse) {
             cytoscapeExpandCollapse(cytoscape);
             console.log('cytoscape-expand-collapse зарегистрирован');
@@ -204,11 +229,11 @@
         // Создаём граф, если он ещё не создан, с небольшой задержкой для гарантии видимости контейнера
         if (tabName === 'graphAll' && !cyAll) {
             setTimeout(function() {
-                cyAll = createCytoscape('graphAllContainer', <?= json_encode($graphAllData, JSON_UNESCAPED_SLASHES) ?>, true);
+                cyAll = createCytoscape('graphAllContainer', graphAllData, true, currentLayoutAll);
             }, 100);
         } else if (tabName === 'graphImport' && !cyImport) {
             setTimeout(function() {
-                cyImport = createCytoscape('graphImportContainer', <?= json_encode($graphImportData, JSON_UNESCAPED_SLASHES) ?>, false);
+                cyImport = createCytoscape('graphImportContainer', graphImportData, false, 'cose-bilkent'); // импортов обычно немного
             }, 100);
         }
 
@@ -224,7 +249,7 @@
     }
 
     // Функция создания графа
-    function createCytoscape(containerId, elements, withFilters = true) {
+    function createCytoscape(containerId, elements, withFilters = true, layoutName = 'cose-bilkent') {
         var container = document.getElementById(containerId);
         if (!container) {
             console.error('Контейнер не найден:', containerId);
@@ -316,7 +341,7 @@
                 }
             ],
             layout: {
-                name: 'cose-bilkent',
+                name: layoutName,
                 animate: false,
                 randomize: true,
                 idealEdgeLength: 100,
@@ -361,7 +386,36 @@
         return cy;
     }
 
-    // Кнопки свернуть/развернуть все
+    // Функция переключения layout для графа всех зависимостей
+    function switchLayoutAll() {
+        if (!cyAll) return;
+        var newLayout = currentLayoutAll === 'cose-bilkent' ? 'cose' : 'cose-bilkent';
+        if (newLayout === 'cose-bilkent' && totalNodes > 100) {
+            if (!confirm('Граф содержит более 100 узлов. Использование cose-bilkent может привести к зависанию браузера. Продолжить?')) {
+                return;
+            }
+        }
+        currentLayoutAll = newLayout;
+        cyAll.layout({
+            name: currentLayoutAll,
+            animate: false,
+            randomize: true,
+            idealEdgeLength: 100,
+            nodeRepulsion: 10000
+        }).run();
+
+        // Обновляем текст кнопки и информацию
+        var switchBtn = document.getElementById('switchLayoutBtn');
+        var layoutInfo = document.getElementById('layoutInfo');
+        if (currentLayoutAll === 'cose') {
+            switchBtn.textContent = 'Переключить на cose-bilkent';
+            layoutInfo.textContent = '(текущий: cose (быстрый))';
+        } else {
+            switchBtn.textContent = 'Переключить на cose';
+            layoutInfo.textContent = '(текущий: cose-bilkent (точный))';
+        }
+    }
+
     document.getElementById('collapseAll')?.addEventListener('click', function() {
         if (collapseApi) {
             collapseApi.collapseAll();

@@ -3,6 +3,10 @@ namespace Scancore\Console;
 
 use Scancore\Scanner;
 use Scancore\IgnoreOptionHandler;
+use Scancore\Filter\FilterManager;
+use Scancore\Filter\ClassFilter;
+use Scancore\Filter\PatternFilter;
+use Scancore\Filter\TypeFilter;
 
 class DumpCommand implements ICommand
 {
@@ -20,12 +24,25 @@ class DumpCommand implements ICommand
         $additionalPatterns = $ignoreHandler->getPatterns();
 
         $scanner = new Scanner($root, $additionalPatterns);
-        $paths = $scanner->scan();
+        $paths = $scanner->scan(); // все пути (файлы и папки)
 
+        // Фильтрация по подпапке
         if ($filterPath !== '') {
             $paths = array_filter($paths, function ($p) use ($filterPath) {
                 return strpos($p, $filterPath . '/') === 0 || $p === $filterPath;
             });
+        }
+
+        // Создаём менеджер фильтров
+        $filterManager = new FilterManager();
+
+        // Обрабатываем опции фильтров
+        $this->addFiltersFromInput($input, $filterManager, $root);
+
+        // Применяем фильтры
+        if ($filterManager->hasFilters()) {
+            // Для dump нам не нужен контекст classMap, передаём пустой массив
+            $paths = $filterManager->apply($paths, $root);
         }
 
         // Оставляем только файлы
@@ -47,5 +64,53 @@ class DumpCommand implements ICommand
 
         fclose($handle);
         echo "Dump written to $outputFile\n";
+    }
+
+    private function addFiltersFromInput(Input $input, FilterManager $fm, string $root): void
+    {
+        // --class
+        $classValues = $this->expandOptionValues($input->getOption('class'));
+        if (!empty($classValues)) {
+            $fm->addFilter(new ClassFilter($classValues));
+        }
+
+        // --pattern
+        $patternValues = $this->expandOptionValues($input->getOption('pattern'));
+        if (!empty($patternValues)) {
+            $fm->addFilter(new PatternFilter($patternValues));
+        }
+
+        // --type
+        $typeValues = $this->expandOptionValues($input->getOption('type'));
+        if (!empty($typeValues)) {
+            $fm->addFilter(new TypeFilter($typeValues));
+        }
+
+        // Предупреждения для неподдерживаемых фильтров
+        $unsupported = ['impl', 'ext', 'use'];
+        foreach ($unsupported as $opt) {
+            if ($input->hasOption($opt)) {
+                fwrite(STDERR, "Warning: --$opt filter is not supported in dump command (ignored).\n");
+            }
+        }
+    }
+
+    /**
+     * Преобразует значение опции в массив, разбивая по запятым.
+     * Если передано несколько раз, объединяет все значения.
+     */
+    private function expandOptionValues(array $values): array
+    {
+        $result = [];
+        foreach ($values as $v) {
+            $parts = explode(',', $v);
+            foreach ($parts as $part) {
+                $part = trim($part);
+                if ($part !== '') {
+                    $result[] = $part;
+                }
+            }
+        }
+        return $result;
     }
 }
