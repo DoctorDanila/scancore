@@ -104,6 +104,9 @@ class HtmlGenerator
         $graphAllData = $this->buildGraphData($this->dependencies['dependents'] ?? []);
         $graphImportData = $this->buildGraphData($this->filterDepsByType($this->dependencies['dependents'] ?? [], 'import'));
 
+        $totalNodes = count($graphAllData['nodes']);
+        $isLargeGraph = $totalNodes > 100;
+
         // Подключаем шаблон
         ob_start();
         include __DIR__ . '/../../resources/views/stats.php';
