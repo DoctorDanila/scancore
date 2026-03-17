@@ -26,6 +26,14 @@ class DependencyAnalyzer
         $this->paths = $paths;
     }
 
+    /**
+     * Возвращает карту классов: полное имя класса => относительный путь файла.
+     */
+    public function getClassMap(): array
+    {
+        return $this->classMap;
+    }
+
     public function analyze(): array
     {
         $phpFiles = array_filter($this->paths, fn($p) => pathinfo($p, PATHINFO_EXTENSION) === 'php');
